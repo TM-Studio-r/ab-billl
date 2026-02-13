@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>محاسبه تقسیم قبض</title>
+<style>
+:root{ --pink:#ff007f; --blue:#00d4ff; }
+*{box-sizing:border-box}
+html,body{height:100%; margin:0}
+body{
+  background:#000;
+  color:#fff;
+  font-family:Tahoma, sans-serif;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:100vh;
+  padding:20px;
+}
+
+/* کارت مرکزی */
+.card{
+  width:100%;
+  max-width:520px;
+  background:rgba(255,255,255,0.06);
+  backdrop-filter:blur(18px);
+  border-radius:26px;
+  padding:22px;
+  box-shadow:0 8px 40px rgba(0,0,0,0.8);
+  display:flex;
+  flex-direction:column;
+  align-items:center; /* وسط بودن محتوای درون کارت */
+  gap:12px;
+}
+
+/* ورودی‌ها و دکمه‌ها */
+.row-input{
+  width:100%;
+  display:flex;
+  gap:10px;
+  justify-content:center;
+  align-items:center;
+}
+
+input[type="number"]{
+  width:140px;
+  max-width:45%;
+  padding:12px 14px;
+  border-radius:50px;
+  border:1px solid rgba(255,255,255,0.12);
+  background:rgba(255,255,255,0.06);
+  color:#fff;
+  text-align:center;
+  outline:none;
+  font-size:15px;
+}
+
+input[type="number"]:focus{
+  box-shadow:0 0 12px var(--blue);
+  border-color:var(--blue);
+}
+
+/* محدود کردن تعداد رقم بصری */
+#unit-count { width:100px; }
+
+/* لیست نفرات واحدها (ورودی‌های داینامیک) */
+.occupants {
+  width:100%;
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  justify-content:center; /* همه کادرهای نفرات وسط باشند */
+  padding:6px 0;
+  max-height:260px;
+  overflow:auto;
+  margin-top:6px;
+}
+
+/* هر فیلد نفر */
+.unit-field{
+  min-width:120px;
+  flex: 0 0 120px;
+}
+
+/* دکمه‌ها */
+.btn{
+  width:85%;
+  max-width:360px;
+  padding:12px;
+  border-radius:50px;
+  border:none;
+  cursor:pointer;
+  background:rgba(255,255,255,0.12);
+  color:#fff;
+  font-size:15px;
+  transition:0.22s;
+}
+
+.btn:hover{ box-shadow:0 0 18px var(--blue); background:var(--blue); color:#000; }
+
+.secondary{
+  background:transparent;
+  border:1px solid rgba(255,255,255,0.12);
+}
+
+/* نتیجه */
+.result{
+  width:100%;
+  background:rgba(0,0,0,0.6);
+  padding:14px;
+  border-radius:16px;
+  margin-top:8px;
+  border-right:4px solid var(--pink);
+  text-align:right;
+  line-height:1.8;
+  font-size:14px;
+  white-space:pre-wrap;
+}
+
+/* پیام خطا کوچک */
+.msg{ color:#ff8080; font-size:13px; }
+
+/* scrollbar کوچیک */
+.occupants::-webkit-scrollbar{height:6px;width:6px}
+.occupants::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.06);border-radius:10px}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <!-- تعداد واحدها -->
+  <div class="row-input">
+    <input id="unit-count" type="number" min="2" max="20" placeholder="تعداد واحد (2-20)" />
+  </div>
+  <div class="msg" id="unit-msg"></div>
+
+  <!-- دکمه ساخت فیلدها (از روی تعداد) -->
+  <button class="btn" id="make-btn">ساخت فیلدهای نفرات واحدها</button>
+
+  <!-- محلی که فیلدهای نفرات واحدها قرار میگیره -->
+  <div id="occupants" class="occupants" aria-live="polite"></div>
+
+  <!-- دکمه‌ها -->
+  <button class="btn" id="save-btn">ذخیره تنظیمات در مرورگر</button>
+  <button class="btn secondary" id="load-btn">بارگذاری تنظیمات ذخیره‌شده</button>
+
+  <!-- مبلغ قبض -->
+  <input id="bill" type="number" placeholder="مبلغ کل قبض آب" />
+
+  <button class="btn" id="calc-btn">محاسبه سهم واحدها</button>
+
+  <div id="result" class="result" style="display:none"></div>
+</div>
+
+<script>
+/* ===== محدودیت طول ورودی تعداد واحد (دو رقم) ===== */
+const unitCountInput = document.getElementById('unit-count');
+const unitMsg = document.getElementById('unit-msg');
+
+unitCountInput.addEventListener('input', function(e){
+  // حذف هر کاراکتر غیر عددی
+  this.value = this.value.replace(/[^\d]/g,'');
+  // حداکثر دو رقم
+  if(this.value.length > 2) this.value = this.value.slice(0,2);
+  // همچنین حداکثر 20 و حداقل 2 را در نمایش رعایت می‌کنیم
+  const v = parseInt(this.value||'0',10);
+  if(v>20){ unitMsg.innerText = "حداکثر 20 واحد مجاز است"; this.value = "20"; setTimeout(()=>unitMsg.innerText='',1500) }
+  if(v>0 && v<2){ unitMsg.innerText = "حداقل 2 واحد"; setTimeout(()=>unitMsg.innerText='',1500) }
+});
+
+/* ===== ساخت فیلدها با شرط‌های if / else if (از 2 تا 20) ===== */
+const occupantsDiv = document.getElementById('occupants');
+document.getElementById('make-btn').addEventListener('click', generateFields);
+
+function generateFields(){
+  const count = parseInt(unitCountInput.value || '0', 10);
+  occupantsDiv.innerHTML = '';
+  if(isNaN(count) || count < 2 || count > 20){
+    unitMsg.innerText = 'تعداد واحد را بین 2 تا 20 وارد کنید';
+    setTimeout(()=> unitMsg.innerText = '', 1600);
+    return;
+  }
+
+  // ❗ کاربر خواسته که از if/else if برای هر تعداد استفاده شود:
+  let tpl = '';
+  if(count === 2){
+    tpl = `
+      <input class="unit-field" type="number" id="u1" placeholder="واحد 1 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u2" placeholder="واحد 2 - نفرات" min="0">
+    `;
+  } else if(count === 3){
+    tpl = `
+      <input class="unit-field" type="number" id="u1" placeholder="واحد 1 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u2" placeholder="واحد 2 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u3" placeholder="واحد 3 - نفرات" min="0">
+    `;
+  } else if(count === 4){
+    tpl = `
+      <input class="unit-field" type="number" id="u1" placeholder="واحد 1 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u2" placeholder="واحد 2 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u3" placeholder="واحد 3 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u4" placeholder="واحد 4 - نفرات" min="0">
+    `;
+  } else if(count === 5){
+    tpl = `
+      <input class="unit-field" type="number" id="u1" placeholder="واحد 1 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u2" placeholder="واحد 2 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u3" placeholder="واحد 3 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u4" placeholder="واحد 4 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u5" placeholder="واحد 5 - نفرات" min="0">
+    `;
+  } else if(count === 6){
+    tpl = `
+      <input class="unit-field" type="number" id="u1" placeholder="واحد 1 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u2" placeholder="واحد 2 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u3" placeholder="واحد 3 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u4" placeholder="واحد 4 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u5" placeholder="واحد 5 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u6" placeholder="واحد 6 - نفرات" min="0">
+    `;
+  } else if(count === 7){
+    tpl = `
+      <input class="unit-field" type="number" id="u1" placeholder="واحد 1 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u2" placeholder="واحد 2 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u3" placeholder="واحد 3 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u4" placeholder="واحد 4 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u5" placeholder="واحد 5 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u6" placeholder="واحد 6 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u7" placeholder="واحد 7 - نفرات" min="0">
+    `;
+  } else if(count === 8){
+    tpl = `
+      <input class="unit-field" type="number" id="u1" placeholder="واحد 1 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u2" placeholder="واحد 2 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u3" placeholder="واحد 3 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u4" placeholder="واحد 4 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u5" placeholder="واحد 5 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u6" placeholder="واحد 6 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u7" placeholder="واحد 7 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u8" placeholder="واحد 8 - نفرات" min="0">
+    `;
+  } else if(count === 9){
+    tpl = `
+      <input class="unit-field" type="number" id="u1" placeholder="واحد 1 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u2" placeholder="واحد 2 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u3" placeholder="واحد 3 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u4" placeholder="واحد 4 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u5" placeholder="واحد 5 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u6" placeholder="واحد 6 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u7" placeholder="واحد 7 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u8" placeholder="واحد 8 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u9" placeholder="واحد 9 - نفرات" min="0">
+    `;
+  } else if(count === 10){
+    tpl = `
+      <input class="unit-field" type="number" id="u1" placeholder="واحد 1 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u2" placeholder="واحد 2 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u3" placeholder="واحد 3 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u4" placeholder="واحد 4 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u5" placeholder="واحد 5 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u6" placeholder="واحد 6 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u7" placeholder="واحد 7 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u8" placeholder="واحد 8 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u9" placeholder="واحد 9 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u10" placeholder="واحد 10 - نفرات" min="0">
+    `;
+  } else if(count === 11){
+    tpl = `
+      <input class="unit-field" type="number" id="u1" placeholder="واحد 1 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u2" placeholder="واحد 2 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u3" placeholder="واحد 3 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u4" placeholder="واحد 4 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u5" placeholder="واحد 5 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u6" placeholder="واحد 6 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u7" placeholder="واحد 7 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u8" placeholder="واحد 8 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u9" placeholder="واحد 9 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u10" placeholder="واحد 10 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u11" placeholder="واحد 11 - نفرات" min="0">
+    `;
+  } else if(count === 12){
+    tpl = `
+      <input class="unit-field" type="number" id="u1" placeholder="واحد 1 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u2" placeholder="واحد 2 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u3" placeholder="واحد 3 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u4" placeholder="واحد 4 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u5" placeholder="واحد 5 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u6" placeholder="واحد 6 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u7" placeholder="واحد 7 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u8" placeholder="واحد 8 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u9" placeholder="واحد 9 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u10" placeholder="واحد 10 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u11" placeholder="واحد 11 - نفرات" min="0">
+      <input class="unit-field" type="number" id="u12" placeholder="واحد 12 - نفرات" min="0">
+    `;
+  } else if(count === 13){
+    tpl = '';
+    for(let t=1;t<=13;t++) tpl += `<input class="unit-field" type="number" id="u${t}" placeholder="واحد ${t} - نفرات" min="0">`;
+  } else if(count === 14){
+    tpl = '';
+    for(let t=1;t<=14;t++) tpl += `<input class="unit-field" type="number" id="u${t}" placeholder="واحد ${t} - نفرات" min="0">`;
+  } else if(count === 15){
+    tpl = '';
+    for(let t=1;t<=15;t++) tpl += `<input class="unit-field" type="number" id="u${t}" placeholder="واحد ${t} - نفرات" min="0">`;
+  } else if(count === 16){
+    tpl = '';
+    for(let t=1;t<=16;t++) tpl += `<input class="unit-field" type="number" id="u${t}" placeholder="واحد ${t} - نفرات" min="0">`;
+  } else if(count === 17){
+    tpl = '';
+    for(let t=1;t<=17;t++) tpl += `<input class="unit-field" type="number" id="u${t}" placeholder="واحد ${t} - نفرات" min="0">`;
+  } else if(count === 18){
+    tpl = '';
+    for(let t=1;t<=18;t++) tpl += `<input class="unit-field" type="number" id="u${t}" placeholder="واحد ${t} - نفرات" min="0">`;
+  } else if(count === 19){
+    tpl = '';
+    for(let t=1;t<=19;t++) tpl += `<input class="unit-field" type="number" id="u${t}" placeholder="واحد ${t} - نفرات" min="0">`;
+  } else if(count === 20){
+    tpl = '';
+    for(let t=1;t<=20;t++) tpl += `<input class="unit-field" type="number" id="u${t}" placeholder="واحد ${t} - نفرات" min="0">`;
+  }
+
+  occupantsDiv.innerHTML = tpl;
+
+  // اگر قبلاً تنظیم ذخیره‌شده وجود داشته باشه، سعی کن مقادیر رو پر کنی
+  const saved = localStorage.getItem('water_occupants');
+  if(saved){
+    try{
+      const savedObj = JSON.parse(saved);
+      if(savedObj.count === count && Array.isArray(savedObj.occupants)){
+        savedObj.occupants.forEach((v,i)=>{
+          const el = document.getElementById('u'+(i+1));
+          if(el) el.value = v;
+        });
+      }
+    }catch(e){}
+  }
+}
+
+/* ===== ذخیره در localStorage ===== */
+document.getElementById('save-btn').addEventListener('click', function(){
+  const count = parseInt(unitCountInput.value||'0',10);
+  if(isNaN(count) || count<2 || count>20){ unitMsg.innerText='ابتدا فیلدها را بسازید'; setTimeout(()=>unitMsg.innerText='',1400); return; }
+
+  const occupants = [];
+  for(let i=1;i<=count;i++){
+    const v = parseFloat(document.getElementById('u'+i).value || '0');
+    occupants.push(Number.isFinite(v) ? v : 0);
+  }
+  const payload = { count: count, occupants: occupants };
+  localStorage.setItem('water_unit_count', String(count));
+  localStorage.setItem('water_occupants', JSON.stringify(payload));
+  unitMsg.innerText = 'ذخیره شد ✅';
+  setTimeout(()=> unitMsg.innerText = '',1300);
+});
+
+/* ===== بارگذاری تنظیمات ذخیره‌شده ===== */
+document.getElementById('load-btn').addEventListener('click', function(){
+  const savedCount = parseInt(localStorage.getItem('water_unit_count')||'0',10);
+  const saved = localStorage.getItem('water_occupants');
+  if(!saved || isNaN(savedCount) || savedCount<2){ unitMsg.innerText = 'تنظیمی ذخیره نشده'; setTimeout(()=>unitMsg.innerText='',1400); return; }
+  unitCountInput.value = savedCount;
+  generateFields(); // این تابع خودش سعی میکنه مقادیر رو از localStorage پر کند
+  unitMsg.innerText = 'بارگذاری شد ✅';
+  setTimeout(()=> unitMsg.innerText = '',1200);
+});
+
+/* ===== محاسبه (محاسبات همان منطق اصلی) ===== */
+document.getElementById('calc-btn').addEventListener('click', function(){
+  const bill = parseFloat(document.getElementById('bill').value || '0');
+  const count = parseInt(unitCountInput.value||'0',10);
+  if(isNaN(bill) || bill<=0){ alert('مبلغ قبض را وارد کنید'); return; }
+  if(isNaN(count) || count<2 || count>20){ alert('تعداد واحدها معتبر نیست'); return; }
+
+  // برداشت ضرایب از فیلدها
+  const weights = [];
+  for(let i=1;i<=count;i++){
+    const v = parseFloat(document.getElementById('u'+i).value || '0');
+    weights.push(Number.isFinite(v) ? v : 0);
+  }
+
+  // مجموع ضرایب
+  const L = weights.reduce((s,x)=>s + (Number(x)||0), 0);
+  if(L === 0){ alert('جمع ضرایب صفر است؛ حداقل یکی از واحدها باید عدد بزرگتر از صفر داشته باشد'); return; }
+
+  const n = bill / L;
+  const shares = weights.map(w => n * w);
+
+  // نمایش (بدون تغییر منطق، فقط قالب نمایش)
+  let out = '';
+  shares.forEach((s,i)=>{
+    out += `واحد ${i+1}: ${Math.round(s)}\n`; // نمایشی گرد شده (مثل نسخه قبلی) — می‌تونی بگی غیر گرد شود
+  });
+  out += `\nجمع نمایش داده‌ها برابر با: ${shares.reduce((a,b)=>a+b,0).toFixed(2)} (تطابق با مبلغ ورودی ممکن است به علت گرد کردن نمایش متفاوت باشد)`;
+
+  const resDiv = document.getElementById('result');
+  resDiv.style.display = 'block';
+  resDiv.textContent = out;
+});
+</script>
+
+</body>
+</html>
+
